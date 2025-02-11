@@ -4,9 +4,10 @@ from rest_framework import status
 from rest_framework.response import Response
 from django.views.decorators.csrf import csrf_exempt
 import json
+import pandas as pd
 from django.core.cache import cache
-from .models import Project,Client,Employee,Department
-from .serializers import Projects_serializer,Project_serializer,Client_serializer,Employee_serializer,Department_serializer
+from .models import Project,Client,Employee,Department,Task
+from .serializers import Projects_serializer,Project_serializer,Client_serializer,Employee_serializer,Department_serializer,Task_Serializer
 from datetime import date
 from django.contrib.auth import authenticate
 from rest_framework.permissions import IsAuthenticated
@@ -22,17 +23,18 @@ from captcha.image import ImageCaptcha
 from io import BytesIO
 import random
 import string
- 
+from django.core.mail import EmailMessage
 # Create your views here.
 
 
 @api_view(['GET'])
+@permission_classes([IsAuthenticated])
 def validate(request):
     return Response({'message':'token is valid'},status=status.HTTP_200_OK)
 
 # Generate Captcha
 def generate_captcha(request):
-    captcha_text = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+    captcha_text = ''.join(random.choices(string.digits, k=6))
     print(captcha_text)
     cache.set('captcha_code', captcha_text, timeout=300)  # Store in cache for 5 minutes
     image = ImageCaptcha()
@@ -80,7 +82,7 @@ def project_type(request):
 @permission_classes([IsAuthenticated])
 @api_view(['GET'])
 def status_name(request,name):
-    data = Project.project_status_choices.get(name,[])
+    data = Task.project_status_choices.get(name,[])
     f = [i[1] for i in data]
     return Response(f,status=status.HTTP_200_OK)
 
@@ -134,12 +136,13 @@ def fetch_project_from_client(request,id):
 
 
 @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated])
 def fetch_projects(request):
     data = Project.objects.all()
     serialized_data = Project_serializer(data,many=True)
     return Response(serialized_data.data,status = status.HTTP_200_OK)
 
+@permission_classes([IsAuthenticated])
 @api_view(['GET'])
 def fetch_project_by_id(request,id):
     data = Project.objects.get(id=id)
@@ -147,6 +150,7 @@ def fetch_project_by_id(request,id):
     return Response(serialized_data.data,status=status.HTTP_200_OK)
 
 @api_view(['POST'])
+@permission_classes([IsAuthenticated])
 def update_projects(request,id):
     item = Project.objects.get(id = id)
     print(item)
@@ -157,3 +161,71 @@ def update_projects(request,id):
     else:
         return Response('Error in saving the form data.....',status = status.HTTP_400_BAD_REQUEST)
 
+@permission_classes([IsAuthenticated])
+@api_view(['POST'])
+def send_email(request):
+    # data = json.loads(request.body) this only works if the body is a json string and not formdata
+    # if it is formdata you have to use the below code....
+    from_email=request.POST.get('from_email')
+    email_reciever = request.POST.get('email_reciever')
+    emails=json.loads(email_reciever)
+    body = request.POST.get('body')
+    subject=request.POST.get('subject')
+    files = request.FILES.getlist('attachment')
+
+
+    from_email='neoemailtest12@gmail.com'
+    email = EmailMessage(subject,body,from_email,[],emails)
+
+    if files != []:
+        for file in files:
+            email.attach(file.name,file.read(),file.content_type)
+    
+    try:
+        email.send()
+        return Response('Email Sent Successfully...',status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({'message':str(e)},status=status.HTTP_400_BAD_REQUEST)
+
+@permission_classes([IsAuthenticated])
+@api_view(['GET'])
+def fetch_all_tasks_by_project_id(request,id):
+    data = Task.objects.filter(Project__id=id)
+    print(data)
+    serialized_data = Task_Serializer(data,many=True)
+    return Response(serialized_data.data,status=status.HTTP_200_OK)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def add_tasks_for_project_id(request,id):
+    data = json.loads(request.body)
+    print(data)
+    data['Project'] = id
+    print(data)
+
+    new_data = Task_Serializer(data=data)
+    if new_data.is_valid():
+        new_data.save()
+        return Response('Data saved successfully',status=status.HTTP_200_OK)
+    else:
+        return Response('Error in saving data.....',status=status.HTTP_404_NOT_FOUND)
+
+
+# def read_excel(request):
+#     df = pd.read_excel('Final GST List-1.xlsx')
+#     print(len(df))
+
+#     for x, y in df.iterrows():
+#         Client.objects.create(
+#             name = y['Client Name'],
+#             group = y['Client Group'],
+#             pan = y['PAN'],
+#             gstin = y['GSTIN'],
+#             tan = y['TAN'],
+#             ptrc = y['PTRC'],
+#             ptec= y['PTEC'],
+#             contact_no = y['Ph. No'],
+#             email = y['Email'],
+#             poc=y['Point of Contact']
+#         )
+    
